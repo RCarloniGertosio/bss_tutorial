@@ -13,6 +13,7 @@ The goal of this tutorial is to present Blind Source Separation (BSS) problems a
 3. [Independant Component Analysis](./3_Independant_Component_Analysis.ipynb)
 4. [Non-negative matrix factorization](./4_NonNegative_Matrix_Factorization.ipynb)
 5. [Sparse matrix factorization: the GMCA example](./5_Sparse_Matrix_Factorization_GMCA.ipynb)
+6. [BSS with pictures](./6_BSS_pictures.ipynb)
 
 ## Requirements
 

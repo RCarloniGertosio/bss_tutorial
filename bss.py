@@ -1,6 +1,8 @@
 import numpy as np
 from scipy.stats import ortho_group
 from sklearn.decomposition import FastICA
+import ffttools as fftt
+
 
 def mad(x):
     """Median absolute deviator"""
@@ -105,12 +107,12 @@ def fastica(X, n):
 
     X = np.copy(X.T)
 
-    fpica = FastICA()
+    fpica = FastICA(n)
 
     S = fpica.fit(X).transform(X).T  # Get the estimated sources
     A = fpica.mixing_  # Get estimated mixing matrix
 
-    return A , S
+    return A, S
 
 
 def multiplicative_update(X, n, nbIt=100):
@@ -273,7 +275,7 @@ def gmca(X, n, nmax=500, k=3, eps=1e-5, L0=True):
         stds = mad(S)
         thrds = k*stds
         if L0:
-            S[np.abs(S)<thrds[:, np.newaxis]] = 0
+            S[np.abs(S) < thrds[:, np.newaxis]] = 0
         else:
             S = np.sign(S)*np.maximum(np.abs(S)-thrds[:, np.newaxis], 0)
 
@@ -293,7 +295,7 @@ def gmca(X, n, nmax=500, k=3, eps=1e-5, L0=True):
         delta_S = np.sqrt(np.sum((S-S_old)**2) / np.sum(S**2))
         S_old = np.copy(S)
 
-        if it==nmax-1:
+        if it == nmax-1:
             print("Convergence warning")
 
     return A, S
@@ -388,6 +390,146 @@ def gmca_getDetails(X, n, nmax=500, k=3, eps=1e-5, L0=True):
             print("Convergence warning")
 
     return A, S, A_its[:it, :, :], S_its[:it, :, :, :], thrds_its[:it, :]
+
+
+def gmca_starlet2(X, n=2, nbItMin=100, nscales=2, k=3, K_max=0.5, L1=True, doRw=1, verb=0):
+    """ GMCA blind source separation algorithm. Not optimized, because wavelet decomposition performed
+    at each iteration.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        (m,p) float array, input data, each row corresponds to an observation
+    n : int
+        number of sources to be estimated
+    nbItMin : int
+        minimum number of iterations
+    nscales : int
+        number of detail scales
+    k : float
+        parameter of the k-std thresholding
+    K_max : float
+        maximal L0 norm of the sources. Being a percentage, it should be between 0 and 1
+    L1 : bool
+        if False, L0 rather than L1 penalization
+    doRw : bool
+        do L1 reweighing during refinement (only if L1 penalization)
+    verb : int
+        verbosity level, from 0 (mute) to 5 (most talkative)
+
+    Returns
+    -------
+    (np.ndarray,np.ndarray)
+        estimated mixing matrix ((m,n) float array),
+        estimated sources ((n,p) float array)
+    """
+
+    m = np.shape(X)[0]
+    p = np.shape(X)[1]
+
+    Xwt = fftt.wt_trans(X, nscales=nscales)
+    Xwt_det = np.reshape(Xwt[:, :, :-1], (m, p*nscales), order="F")
+
+    R = np.dot(Xwt_det, Xwt_det.T)
+    D, V = np.linalg.eig(R)
+    A = V[:, 0:n].real
+
+    A /= np.maximum(np.linalg.norm(A, axis=0), 1e-24)
+
+    A_old = np.zeros((m, n))
+    S_old = np.zeros((n, p*nscales))
+
+    perc = K_max / (nbItMin-1)
+
+    it = -1
+
+    carry_on = True
+
+    while True:
+
+        it += 1
+
+        if verb >= 2:
+            print("Iteration #", it+1)
+
+        # --- Estimate the sources
+
+        # Least-square
+
+        Ra = np.dot(A.T, A)
+        Ua, Sa, Va = np.linalg.svd(Ra)
+        Sa[Sa < np.max(Sa) * 1e-9] = np.max(Sa) * 1e-9
+        iRa = np.dot(Va.T, np.dot(np.diag(1. / Sa), Ua.T))
+        piA = np.dot(iRa, A.T)
+        S = piA @ Xwt_det
+
+        # Thresholding
+
+        K = np.minimum(perc*(it+1), K_max)
+        if not carry_on:
+            S = piA@X
+            return A, S
+
+        if verb >= 3:
+            print("Maximal L0 norm of the sources: %.1f %%" % (K * 100))
+
+        for i in range(n):
+            for j in range(nscales):
+                Swtij = S[i, p*j:p*(j+1)]
+                Swt_rwij = S_old[i, p*j:p*(j+1)]
+                std = mad(Swtij)
+                thrd = k * std
+
+                # Support based threshold
+                if K != 1:
+                    npix = np.sum(abs(Swtij) - thrd > 0)
+                    Kval = np.maximum(np.int(K*npix), 5)
+                    thrd = np.partition(abs(Swtij), p-Kval)[p-Kval]
+
+                if verb >= 4:
+                    print("Threshold of source %i at scale %i: %.5e" % (i+1, j+1, thrd))
+
+                # Adapt the threshold if reweighing demanded
+                if K == K_max and doRw and L1:
+                    thrd = thrd/(np.abs(Swt_rwij)/(k*std)+1)
+                else:
+                    thrd = thrd * np.ones(p)
+
+                # Apply the threshold
+                Swtij[(abs(Swtij) < thrd)] = 0
+                if L1:
+                    indNZ = np.where(abs(Swtij) > thrd)[0]
+                    Swtij[indNZ] = Swtij[indNZ]-thrd[indNZ]*np.sign(Swtij[indNZ])
+
+                S[i, p*j:p*(j+1)] = Swtij
+
+        # --- Update the mixing matrix
+
+        Rs = S@S.T
+        Us, Ss, Vs = np.linalg.svd(Rs)
+        Ss[Ss < np.max(Ss) * 1e-9] = np.max(Ss) * 1e-9
+        iRs = Vs.T@np.diag(1/Ss)@Us.T
+        piS = np.dot(S.T, iRs)
+        A = np.dot(Xwt_det, piS)
+
+        A /= np.maximum(np.linalg.norm(A, axis=0), 1e-24)
+
+        # --- Post processing
+
+        delta_S = np.sqrt(np.sum((S-S_old)**2) / np.sum(S**2))
+        S_old = S.copy()
+
+        delta_A = np.max(abs(1. - abs(np.sum(A * A_old, axis=0))))  # angular variations
+        cond_A = np.linalg.cond(A)  # condition number
+        A_old = A.copy()
+
+        if verb >= 2:
+            print("delta_S = %.2e - delta_A = %.2e - cond(A) = %.2f" % (delta_S, delta_A, cond_A))
+        if verb >= 5:
+            print("A:\n", A)
+
+        if (it >= nbItMin and delta_S <= 1e-6) or (it >= nbItMin*2):
+            carry_on = False
 
 
 def corr_perm(A0, S0, A, S, inplace=False, optInd=False):
