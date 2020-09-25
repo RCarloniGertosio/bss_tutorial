@@ -11,8 +11,8 @@ USER ${NB_USER}
 
 #RUN  conda install -c anaconda numpy
 #RUN  conda install -c anaconda matplotlib
-RUN  conda install -c anaconda scipy
-     conda install -c anaconda scikit-learn
+RUN  conda install -c anaconda scipy scikit-learn
+#RUN  conda install -c anaconda scikit-learn
 
 # Make sure the contents of our repo are in ${HOME}
 COPY . ${HOME}
