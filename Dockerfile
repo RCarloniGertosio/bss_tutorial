@@ -10,7 +10,7 @@ ENV HOME /home/${NB_USER}
 USER ${NB_USER}
 
 #RUN  conda install -c anaconda numpy
-#RUN  conda install -c anaconda matplotlib
+RUN  conda install matplotlib
 RUN  conda install scipy
 RUN  conda install scikit-learn
 
