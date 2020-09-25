@@ -392,7 +392,7 @@ def gmca_getDetails(X, n, nmax=500, k=3, eps=1e-5, L0=True):
     return A, S, A_its[:it, :, :], S_its[:it, :, :, :], thrds_its[:it, :]
 
 
-def gmca_starlet2(X, n=2, nbItMin=100, nscales=2, k=3, K_max=0.5, L1=True, doRw=1, verb=0):
+def gmca_starlet(X, n=2, nbItMin=100, nscales=2, k=3, K_max=0.5, L1=True, doRw=1, verb=0):
     """ GMCA blind source separation algorithm. Not optimized, because wavelet decomposition performed
     at each iteration.
 
